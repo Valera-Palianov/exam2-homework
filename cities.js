@@ -30,6 +30,7 @@ const OUTPUT_FILE = "./output.json"
 const filePath = process.argv[3] ? process.argv[3] : "./cities.json"
 const query = process.argv[2] ? process.argv[2] : 'all'
 
+//2 обертки с промисами для стандартных функций чтения и записи в файл
 function readFile(file, encoding = "utf8") {
 	return new Promise((res, rej) => {
 		fs.readFile(file, encoding, (err, data) => {
@@ -58,6 +59,8 @@ async function readAndParse(file, encoding = "utf8") {
 	}
 }
 
+//Функция обработки запроса. Состоит из двух функций, первая отвечает за обязательную часть запроса с количеством записей,
+//а вторая функция отвечает за обработку второй части, где идут уже условия ключ - значение
 function parseQuery(query) {
 	let result = {}
 
@@ -128,10 +131,12 @@ function parseCondition(condition, base = {}) {
 	return result
 }
 
+//Просто функция для единого формата вывода города в консоль
 function formatCity(city) {
 	return `${city.number}\t${city.city} | ${city.region}`
 }
 
+//Функция сравнения двух значений, работающая с символами операторов
 function compare(operator, a, b) {
 	result = false;
 	switch(operator) {
