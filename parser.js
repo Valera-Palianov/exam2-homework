@@ -12,14 +12,18 @@ class Parser {
 	}
 
 	async parse() {
+
+		//Пытаемся считать файл и преобразовать его данные в JSON. Если метод вернул ошибку, останавливаем функцию и возвращаем текст ошибки
 		const readFileResult = await this.readFile(this.inputPath)
 		if(readFileResult.error) return readFileResult.error
 		this.rawData = readFileResult.data
-		
+
+		//Пытаемся обработать запрос. При любых ошибках, опять же, функция останавливается и вовзращает текст ошибки	
 		const parseQueryResult = this.parseQuery(this.rawQuery)
 		if(parseQueryResult.error) return parseQueryResult.error
 		this.query = parseQueryResult.query
 
+		//Если запрос содержит фильтр, то фильтруем данные в отдельном методе
 		if(this.query.filter) {
 			this.data = this.filter(this.rawData, this.query.filter)
 			if(this.data.length == 0) return "Search results are empty"
@@ -27,6 +31,7 @@ class Parser {
 			this.data = this.rawData
 		}
 
+		//Отбрасываем от фильтрованных данных все лишнее, согласно первой части запроса
 		if(this.query.count !== 'all') {
 			if(this.query.count === 'first' || this.query.count === 'last') {
 				if(this.query.count === 'first') this.data = [this.data[0]]
@@ -36,6 +41,7 @@ class Parser {
 			}
 		}
 
+		//Начинаем запись в файл. Не дожидаемся его завершения и сразу воззвращаем массив с данными.
 		this.writeFile(this.outputPath, this.data)
 
 		return this.data
