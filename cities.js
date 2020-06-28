@@ -32,223 +32,205 @@
 const fs = require("fs")
 const {log, warn, error} = console
 
-const OUTPUT_FILE = "./output.json"
-
-//Получаем аргументы
-const filePath = process.argv[3] ? process.argv[3] : "./cities.json"
-const query = process.argv[2] ? process.argv[2] : 'all'
-
-//2 обертки с промисами для стандартных функций чтения и записи в файл
-function readFile(file, encoding = "utf8") {
-	return new Promise((res, rej) => {
-		fs.readFile(file, encoding, (err, data) => {
-			if(!err) res(data)
-			rej(err)
-		})
-	})
-}
-
-function writeFile(file, data) {
-	return new Promise((res, rej) => {
-		fs.writeFile(file, JSON.stringify(data), (err) => {
-			if(!err) res(true)
-			rej(err)
-		})
-	})
-}
-
-async function readAndParse(file, encoding = "utf8") {
-	try {
-		const toJson = await readFile(file, encoding)
-		return JSON.parse(toJson)
-	} catch(err) {
-		warn('Something very wrong with this file, try again')
-		throw err
+//Класс Parser получает ссылку на входной файл, на выходной файл и запрос
+//После вызова асинхронного метода parse() он читает входной файл, переводит его в JSON формат, фильтрует согластно запросу и возвращает результат обратно
+//А так же записывает результат в указанный файл
+class Parser {
+	constructor(input = './input.json', output = './output.json', query = 'all') {
+		this.rawQuery = query
+		this.inputPath = input
+		this.outputPath = output
 	}
-}
 
-//Функция обработки запроса. Состоит из двух функций, первая отвечает за обязательную часть запроса с количеством записей,
-//а вторая функция отвечает за обработку второй части, где идут уже условия ключ - значение
-function parseQuery(query) {
-	let result = {}
+	async parse() {
 
-	const correctCount = ['all', 'first', 'last']
+		//Пытаемся считать файл и преобразовать его данные в JSON. Если метод вернул ошибку, останавливаем функцию и возвращаем текст ошибки
+		const readFileResult = await this.readFile(this.inputPath)
+		if(readFileResult.error) return readFileResult.error
+		this.rawData = readFileResult.data
 
-	const args = query.split(' ')
-	const count = args[0]
+		//Пытаемся обработать запрос. При любых ошибках, опять же, функция останавливается и вовзращает текст ошибки	
+		const parseQueryResult = this.parseQuery(this.rawQuery)
+		if(parseQueryResult.error) return parseQueryResult.error
+		this.query = parseQueryResult.query
 
-	if(correctCount.includes(count)) {
-		result.count = count
-	} else {
-		const numberCount = parseInt(count, 10)
-		if(!isNaN(numberCount)) {
-			result.count = numberCount
+		//Если запрос содержит фильтр, то фильтруем данные в отдельном методе
+		if(this.query.filter) {
+			this.data = this.filter(this.rawData, this.query.filter)
+			if(this.data.length == 0) return "Search results are empty"
 		} else {
-			log("Query is incorrect! Count of entrys should be 'all', 'first', 'last' or number")
-			return false
+			this.data = this.rawData
+		}
+
+		//Отбрасываем от фильтрованных данных все лишнее, согласно первой части запроса
+		if(this.query.count !== 'all') {
+			if(this.query.count === 'first' || this.query.count === 'last') {
+				if(this.query.count === 'first') this.data = [this.data[0]]
+				if(this.query.count === 'last') this.data = [this.data[this.data.length-1]]
+			} else {
+				this.data = this.data.slice(0, this.query.count)
+			}
+		}
+
+		//Начинаем запись в файл. Не дожидаемся его завершения и сразу воззвращаем массив с данными.
+		this.writeFile(this.outputPath, this.data)
+
+		return this.data
+	}
+
+	async readFile(file, encoding = 'utf8') {
+
+		let data = []
+		let readError = false
+
+		const readFilePromise = new Promise((res, rej) => {
+			fs.readFile(file, encoding, (err, data) => {
+				if(!err) res(data)
+				rej(err)
+			})
+		})
+
+		try {
+			data = await readFilePromise
+
+			try {
+				data = JSON.parse(data)
+			} catch(err) {
+				readError = "This is not JSON file"
+			}	
+
+		} catch(err) {
+			readError = "Could not process file"
+		}	
+
+		return {
+			error: readError,
+			data: data
 		}
 	}
 
-	if(args[1]) result = parseCondition(args[1], result)
+	async writeFile(file, data) {
+		return new Promise((res, rej) => {
+			fs.writeFile(file, JSON.stringify(data), (err) => {
+				if(!err) res(true)
+				rej(err)
+			})
+		})
+	}
 
-	return result
-}
+	parseQuery(query) {
+		const correctCount = ['all', 'first', 'last']
 
-function parseCondition(condition, base = {}) {
-	const result = base
+		let count
+		let filter = false
+		let error = false
 
-	const correctKeys = ['region', 'city', 'number']
-	const operatorIndex = condition.search(/[<, >, =]/)
+		const args = query.split(' ')
+		count = args[0]
 
-	if(operatorIndex !== -1) {
-		const operator = condition[operatorIndex]
-		result.operator = operator
+		if(!correctCount.includes(count)) {
+			count = parseInt(count, 10)
+			if(isNaN(count)) {
+				error = "Query is incorrect! Count of entrys should be 'all', 'first', 'last' or number"
+			}
+		}
 
-		const keyAndValue = condition.split(operator)
-		const key = keyAndValue[0].slice(1, -1)
+		if(args[1]) {
 
-		if(correctKeys.includes(key)) {
-			result.key = key
+			if(args[1] == 'where') {
+				if(args[2]) {
+					let rawFilter = args[2]
+					filter = {}
 
-			if(keyAndValue[1]) {
-				const value = keyAndValue[1]
-				
-				if(key !== 'number') {
-					result.value = value
-				} else {
-					if(!isNaN(parseInt(value))) {
-						result.value = parseInt(value)
+					const operatorIndex = rawFilter.search(/[<, >, =]/)
+					if(operatorIndex !== -1) {
+						filter.operator = rawFilter[operatorIndex]
+
+						const keyAndValue = rawFilter.split(filter.operator)
+
+						if(keyAndValue[0]) {
+							const key = keyAndValue[0]
+							if(/^%[a-z]+%$/i.test(key)) {
+								filter.key = key.slice(1, -1)
+
+								if(keyAndValue[1]) {
+									filter.value = keyAndValue[1]
+								} else {
+									error = "Query is incorrect! Search value is empty"
+								}
+							} else {
+								error = "Query is incorrect! The key must consist of A-Z letters and be framed by a % sign"		
+							}
+						} else {
+							error = "Query is incorrect! Search key cannot be empty!"	
+						}
 					} else {
-						log("Query is incorrect! Search value should be number")
-						return false		
+						error = "Query is incorrect! Operator should be <, > or ="
 					}
-				}
-			} else {
-				log("Query is incorrect! Search value is empty")
-				return false	
-			}
-		} else {
-			log("Query is incorrect! Search key should be region, city or number")
-			return false
-		}
-	} else {
-		log("Query is incorrect! Operator should be <, > or =")
-		return false
-	}
-
-	return result
-}
-
-//Просто функция для единого формата вывода города в консоль
-function formatCity(city) {
-	return `${city.number}\t${city.city} | ${city.region}`
-}
-
-//Функция сравнения двух значений, работающая с символами операторов
-function compare(operator, a, b) {
-	result = false;
-	switch(operator) {
-		case '=':
-			if(a === b) result = true
-			break;
-		case '>':
-			if(a > b) result = true
-			break;
-		case '<':
-			if(a < b) result = true
-			break;
-	}
-	return result
-}
-
-readAndParse(filePath)
-	.then((cities) => {
-		//Обрабатываем запрос и проверяем, корректен ли он. Если да, передаем массив и запрос дальше
-		const parsedQuery = parseQuery(query)
-		if (parsedQuery !== false) {
-			return {
-				list: cities,
-				query: parsedQuery
-			}
-		} else {
-			process.exit(-1)
-		}
-	})
-	.then((data) => {
-		//Создаем новый массив согластно условиям поиска. Если они есть. Если нет, передаем массив, его длинну и запрос дальше. 
-		const {list, query} = data
-
-		const listLength = list.length
-		let searchResult = list
-		let searchResultLength = listLength
-
-		if(query.key) {
-			searchResult = []
-
-			for(item of list) {
-				if(compare(query.operator, item[query.key], query.value)) {
-					searchResult.push(item)
-				}
-			}
-			searchResultLength = searchResult.length
-		}
-
-		return {
-			list: searchResult,
-			length: searchResultLength,
-			query: query
-		}
-	})
-	.then((data) => {
-		//Выводим из результатов поиска только нужное кол-во записей
-		const {list, length, query} = data
-
-		let finalList = []
-		let listCount
-
-		if(list !== 0) {
-			if(query.count === 'first' || query.count === 'last') {
-				if(query.count === 'first') finalList.push(list[0])
-				if(query.count === 'last') finalList.push(list[list.length-1])
-				listCount = 1
-			} else {
-				if(query.count === 'all') {
-					listCount = length
-					finalList = list				
 				} else {
-					listCount = query.count > length ? length : query.count
-
-					for(let i = 0; i < listCount; i++) {
-						finalList.push(list[i])
-					}
+					error = "Query is incorrect! The search query cannot be empty, if 'where' is use"
 				}
-
+			} else {
+				error = "Query is incorrect! The search query must be after the word 'where'"
 			}
-		} else {
-			log('Sorry, the search has not given any results')
-			process.exit(-1)
 		}
 
 		return {
-			list: finalList,
-			count: listCount	
+			error: error,
+			query: {
+				count: count,
+				filter: filter
+			}
 		}
-	})
-	.then((data) => {
-		//Выводим в консоль
-		const {list, count} = data
-		log()
-		log('--------------------------')
-		for(let city of list) {
-			log(formatCity(city))
-		}
-		log('--------------------------')
-		log('Total: '+count)
-		log()
+	}
 
-		return list
-	})
-	.then((array) => {
-		//Записываем в файл
-		writeFile(OUTPUT_FILE, array)
+	filter(data, filter) {
+		const result = []
+
+		function compare(operator, a, b) {
+			let result = false;
+			switch(operator) {
+				case '=':
+					if(a == b) result = true
+					break;
+				case '>':
+					if(a > b) result = true
+					break;
+				case '<':
+					if(a < b) result = true
+					break;
+			}
+			return result
+		}
+
+		for(let item of data) {
+			if(compare(filter.operator, item[filter.key], filter.value)) {
+				result.push(item)
+			}
+		}
+
+		return result
+	}
+}
+
+const query = process.argv[2] ? process.argv[2] : 'all'
+const inputFile = process.argv[3] ? process.argv[3] : "./cities.json"
+const outputFile = process.argv[4] ? process.argv[4] : "./output.json"
+
+const cities = new Parser(inputFile, outputFile, query)
+
+cities.parse()
+	.then(result => {
+		if(Array.isArray(result)) {
+			log()
+			log('--------------------------')
+			for(let city of result) {
+				log( `${city.number}\t${city.city} | ${city.region}` )
+			}
+			log('--------------------------')
+			log('Total: '+result.length)
+			log()
+		} else {
+			log(result)
+		}
 	})
