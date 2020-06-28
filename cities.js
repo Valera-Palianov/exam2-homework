@@ -177,9 +177,7 @@ class Parser {
 	}
 
 	filter(data, filter) {
-		const result = []
-
-		function compare(operator, a, b) {
+		const compare = (operator, a, b) => {
 			let result = false;
 			switch(operator) {
 				case '=':
@@ -195,13 +193,7 @@ class Parser {
 			return result
 		}
 
-		for(let item of data) {
-			if(compare(filter.operator, item[filter.key], filter.value)) {
-				result.push(item)
-			}
-		}
-
-		return result
+		return data.filter(item => compare(filter.operator, item[filter.key], filter.value))
 	}
 }
 
