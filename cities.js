@@ -27,6 +27,8 @@ const {log, warn, error} = console
 //Класс Parser получает ссылку на входной файл, на выходной файл и запрос
 //После вызова асинхронного метода parse() он читает входной файл, переводит его в JSON формат, фильтрует согластно запросу и возвращает результат обратно
 //А так же записывает результат в указанный файл
+//Особенностью этого класса является то, что он жестко не привязан к поиску именно по городам. Это может быть массив из любых объектов, с любыми ключами
+
 class Parser {
 	constructor(input = './input.json', output = './output.json', query = 'all') {
 		this.rawQuery = query
@@ -209,7 +211,7 @@ cities.parse()
 			log()
 			log('--------------------------')
 			for(let city of result) {
-				log( `${city.number}\t${city.city} | ${city.region}` )
+				log( `${city.number}\t${city.city}| ${city.region}` )
 			}
 			log('--------------------------')
 			log('Total: '+result.length)
